@@ -1,0 +1,117 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f1115;
+  color: #e6e8eb;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem;
+  gap: 1rem;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.5rem;
+  justify-content: center;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.status {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: #8b929e;
+}
+
+.latency {
+  color: #4fd1a5;
+}
+
+.palette {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 2px solid #2c313c;
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch.selected {
+  border-color: #ffffff;
+  transform: scale(1.1);
+}
+
+.canvas-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: #8b929e;
+}
+
+.zoom-controls button {
+  background: #1d212b;
+  color: #e6e8eb;
+  border: 1px solid #2c313c;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.canvas-scroll {
+  max-width: 90vw;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #2c313c;
+  border-radius: 8px;
+}
+
+.pixel-canvas {
+  image-rendering: pixelated;
+  cursor: crosshair;
+  display: block;
+}
+
+.error-toast {
+  background: #3a1a1a;
+  border: 1px solid #ff6b6b;
+  color: #ff6b6b;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
