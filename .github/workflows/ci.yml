@@ -64,21 +64,35 @@ jobs:
           import asyncio, json
           import websockets
 
+          async def recv_type(ws, want_type, timeout=3):
+              # Every connection also receives its own (and every other
+              # connection's) user_count broadcasts interleaved with
+              # whatever a test is actually waiting for -- skip past them
+              # instead of assuming a fixed message position, the same fix
+              # applied to the Go test suite's readMessageOfType helper
+              # after the same assumption broke there first. wait_for
+              # (not asyncio.timeout(), which needs Python 3.11+) for
+              # portability.
+              async def _read_until_match():
+                  while True:
+                      msg = json.loads(await ws.recv())
+                      if msg["type"] == want_type:
+                          return msg
+              return await asyncio.wait_for(_read_until_match(), timeout=timeout)
+
           async def main():
               async with websockets.connect("ws://localhost:8080/ws?session=ci-1") as a:
-                  snap = json.loads(await a.recv())
-                  assert snap["type"] == "snapshot", snap
+                  snap = await recv_type(a, "snapshot")
                   assert len(snap["pixels"]) == 500 and len(snap["pixels"][0]) == 500
 
                   async with websockets.connect("ws://localhost:8080/ws?session=ci-2") as b:
-                      await a.recv()  # user_count bump for b joining
-                      assert json.loads(await b.recv())["type"] == "snapshot"
+                      await recv_type(b, "snapshot")
 
                       await a.send(json.dumps({"type": "paint", "x": 7, "y": 9, "color": "#E50000"}))
-                      msg_a = json.loads(await a.recv())
-                      msg_b = json.loads(await b.recv())
+                      msg_a = await recv_type(a, "pixel")
+                      msg_b = await recv_type(b, "pixel")
                       assert msg_a == msg_b, (msg_a, msg_b)
-                      assert msg_a["type"] == "pixel" and msg_a["x"] == 7 and msg_a["color"] == "#E50000"
+                      assert msg_a["x"] == 7 and msg_a["color"] == "#E50000"
                       print("broadcast confirmed on both connections:", msg_a)
 
           asyncio.run(main())
