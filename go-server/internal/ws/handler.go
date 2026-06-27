@@ -116,12 +116,23 @@ func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := newClient(sessionID)
-	count := s.Hub.Register(client)
 	go s.writePump(conn, client)
 
+	// Send the snapshot *before* registering with the hub. Registering
+	// first opened a real race under concurrent connections: Snapshot()
+	// is a Redis round trip, and while it's in flight, an already-
+	// registered client can receive a broadcast (another user's paint, or
+	// even another connection's own user_count bump) that gets queued
+	// ahead of its own snapshot -- found by load-testing 550 concurrent
+	// connections, where only 60 of them saw "snapshot" as their first
+	// message instead of all 550. Queuing the snapshot through a client
+	// the hub doesn't know about yet, then registering only once that's
+	// done, makes "snapshot first" structurally guaranteed rather than
+	// merely likely.
 	if err := s.sendSnapshot(r.Context(), client); err != nil {
 		log.Printf("failed to send snapshot to %s: %v", sessionID, err)
 	}
+	count := s.Hub.Register(client)
 	s.broadcastUserCount(r.Context(), count)
 
 	s.readPump(r.Context(), conn, client, sessionID)

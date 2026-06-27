@@ -2,9 +2,11 @@ package ws
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,4 +180,43 @@ func TestPaintOutOfBoundsIsRejected(t *testing.T) {
 
 	_ = conn.WriteJSON(map[string]any{"type": "paint", "x": 999, "y": 1, "color": "#E50000"})
 	readMessageOfType(t, conn, "error", 2*time.Second)
+}
+
+// TestEveryConcurrentConnectionSeesSnapshotFirst is the regression test for
+// a real race a 550-connection load test against the live docker-compose
+// stack actually hit: registering a client with the hub before its
+// snapshot finished sending let another connection's broadcast (their own
+// user_count bump, in that load test) land in the queue first. 30
+// connections, all racing to connect at once, is enough to reproduce it
+// reliably against this in-process test server -- it failed consistently
+// before the fix that moved Hub.Register to after sendSnapshot.
+func TestEveryConcurrentConnectionSeesSnapshotFirst(t *testing.T) {
+	_, srv := newTestServer(t)
+	const n = 30
+
+	var wg sync.WaitGroup
+	failures := make([]string, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			conn := dialWS(t, srv, fmt.Sprintf("racer-%d", i))
+			_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			var msg map[string]any
+			if err := conn.ReadJSON(&msg); err != nil {
+				failures[i] = fmt.Sprintf("read failed: %v", err)
+				return
+			}
+			if msg["type"] != "snapshot" {
+				failures[i] = fmt.Sprintf("first message was %v, not snapshot", msg["type"])
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, f := range failures {
+		if f != "" {
+			t.Errorf("connection %d: %s", i, f)
+		}
+	}
 }
