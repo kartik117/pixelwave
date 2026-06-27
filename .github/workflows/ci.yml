@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # No mocked Redis/Postgres -- canvas_test.go and history_test.go spin
+      # up real redis:7-alpine / postgres:16-alpine containers via
+      # testcontainers-go, which needs the Docker daemon ubuntu-latest
+      # already provides.
+      - run: go vet ./...
+      - run: gofmt -l . | tee /tmp/fmt.out && [ ! -s /tmp/fmt.out ]
+      - run: go test ./... -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+
+      - name: Wait for go-server health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/health && exit 0
+            sleep 2
+          done
+          echo "go-server never became healthy" >&2
+          exit 1
+
+      - name: Paint a pixel over the real API, confirm it broadcasts and persists
+        run: |
+          set -e
+          pip install --quiet websockets
+          python3 - <<'EOF'
+          import asyncio, json
+          import websockets
+
+          async def main():
+              async with websockets.connect("ws://localhost:8080/ws?session=ci-1") as a:
+                  snap = json.loads(await a.recv())
+                  assert snap["type"] == "snapshot", snap
+                  assert len(snap["pixels"]) == 500 and len(snap["pixels"][0]) == 500
+
+                  async with websockets.connect("ws://localhost:8080/ws?session=ci-2") as b:
+                      await a.recv()  # user_count bump for b joining
+                      assert json.loads(await b.recv())["type"] == "snapshot"
+
+                      await a.send(json.dumps({"type": "paint", "x": 7, "y": 9, "color": "#E50000"}))
+                      msg_a = json.loads(await a.recv())
+                      msg_b = json.loads(await b.recv())
+                      assert msg_a == msg_b, (msg_a, msg_b)
+                      assert msg_a["type"] == "pixel" and msg_a["x"] == 7 and msg_a["color"] == "#E50000"
+                      print("broadcast confirmed on both connections:", msg_a)
+
+          asyncio.run(main())
+          EOF
+
+          canvas=$(curl -sf http://localhost:8080/canvas)
+          echo "$canvas" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d['pixels'][9][7] == '#E50000', d['pixels'][9][7]
+          assert d['event_count'] == 1, d['event_count']
+          print('canvas + history both reflect the paint')
+          "
+
+      - name: Canvas survives a full Redis wipe via Postgres history
+        run: |
+          set -e
+          docker compose exec -T redis redis-cli FLUSHALL
+          docker compose restart go-server
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8080/canvas | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d['pixels'][9][7] == '#E50000', 'pixel did not survive a Redis wipe: ' + d['pixels'][9][7]
+          print('canvas correctly restored from Postgres history after losing Redis entirely')
+          "
+
+      - name: Frontend is reachable
+        run: curl -sf -o /dev/null http://localhost:3000/
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs
