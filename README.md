@@ -101,5 +101,3 @@ pixelwave/
 **Redis BITFIELD's `#offset` notation needs `type` and `offset` as separate arguments**, not concatenated into one string (`"u4", "#5"`, not `"u4#5"`) -- caught by reading go-redis's own godoc before writing the real `SetPixel`/`GetPixel` calls, not by a failing test.
 
 **Verified the Redis-wipe recovery path for real**, not just by code review: painted a pixel, confirmed it via `GET /canvas`, ran `redis-cli FLUSHALL` (a complete wipe, not just a restart), restarted `go-server`, and confirmed the exact same pixel came back -- reconstructed from Postgres's append-only `pixel_events` log via `Canvas.RestoreFromHistory`, logged explicitly (`"canvas missing from redis -- restoring N pixels from postgres history"`) rather than silently.
-
-**Known simplifications:** one shared canvas/session per browser (no boards or rooms); `user_count` is per-process, not aggregated across replicas (the resume spec's docker-compose only runs one `go-server`, so this wasn't exercised against a multi-replica deployment); no admin/moderation tooling to clear or roll back the canvas.
