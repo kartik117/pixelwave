@@ -179,4 +179,3 @@ func TestPaintOutOfBoundsIsRejected(t *testing.T) {
 	_ = conn.WriteJSON(map[string]any{"type": "paint", "x": 999, "y": 1, "color": "#E50000"})
 	readMessageOfType(t, conn, "error", 2*time.Second)
 }
-
